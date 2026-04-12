@@ -1,6 +1,6 @@
 # The line
 
-![power_line.jpg](pics/line_picture.jpg)
+![line_picture.jpg](pics/line_picture.jpg)
 
 Power lines are fundamental components of power systems, responsible for transmitting electrical energy from generation sources to loads. They can be represented using mathematical models that describe their electrical behavior. In this notebook, we will discuss:
 - The **$\pi$-model** for transmission lines
@@ -15,7 +15,7 @@ The $\pi$-model is a widely used equivalent circuit representation of transmissi
 
 #### The $\pi$-model Circuit Representation:
 
-![line_model.png](pics/pi_model.png)
+![pi_model.png](pics/pi_model.png)
 
 - R: Series resistance
 - X: Series reactance
@@ -88,7 +88,7 @@ Carson's equations, introduced in 1926, are used in power system analysis to cal
 
 - The spacing between conductors is at least one order of magnitude larger than the conductor radius, so that proximity effects can be ignored.
 
-![Carson_Geometry](pictures/Carson_Geometry.png)
+![wire_images_method.png](pics/wire_images_method.png)
 
 The elements of the series impedance matrix can then be calculated from the geometry of the tower configuration shown in the previous figure, and from the characteristics of conductors. Then, self and mutual impedances can be computed using the following equations:
 
