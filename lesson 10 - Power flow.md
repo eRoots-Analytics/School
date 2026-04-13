@@ -13,9 +13,10 @@ numerical methods:
   established scalable formulations.
 - **1970s (speed for operations):** Stott and Alsac (1974) introduced Fast
   Decoupled Load Flow, which became widely used in EMS/planning tools.
-- **1990s-today (large-scale optimization era):** Sparse linear algebra,
+- **1990s-2010 (large-scale optimization era):** Sparse linear algebra,
   interior-point OPF, and high-quality open datasets/software (e.g., MATPOWER,
   PGLib-OPF) made very large AC studies routine.
+- **2010s-today**: Holomorphic embedding. Trias et. al.
 
 Representative references:
 - Ward, J. B., and Hale, H. W. (1956), "Digital Computer Solution of Power-Flow Problems", *Transactions of the AIEE, Part III*.
@@ -64,39 +65,91 @@ $$
 S_i = V_i\left(\sum_{j \in \mathcal{N}} Y_{ij}V_j\right)^*
 $$
 
-Unknowns are usually solved by bus type:
-- Slack bus: $|V|,\theta$ fixed, $P,Q$ result from the solution.
-- PV bus: $P,|V|$ fixed, unknown $\theta,Q$ (with $Q$-limits handled via PV/PQ switching).
-- PQ bus: $P,Q$ fixed, unknown $|V|,\theta$.
 
-Compact mismatch form used in Newton-Raphson:
+We can expand the equation to only have real numbers:
 
 $$
-\Delta x = \begin{bmatrix}
-\Delta \theta_{\text{(non-slack)}} \\
-\Delta |V|_{\text{(PQ)}}
-\end{bmatrix},
-\quad
 \begin{bmatrix}
-\Delta P \\
-\Delta Q
+ P \\
+ Q
 \end{bmatrix}
 =
+\begin{bmatrix}
+B & G \\
+G & B
+\end{bmatrix}
+\begin{bmatrix}
+ \theta \\
+ V_m
+\end{bmatrix}
+$$
+
+The flows on the system branches can be computed as:
+
+$$
+	{S_f}_{k} = {{V_m}_f^2} \cdot {{Y_f}_{kf}^*} + {V_m}_f^{\angle{\theta_f}} \cdot {V_m}_t^{\angle{-\theta_t}}  \cdot  {Y_f}_{kt}^*
+$$
+
+$$
+	{S_t}_{k} = {{V_m}_t^2} \cdot {{Y_t}_{kt}^*} + {V_m}_f^{\angle{-\theta_f}} \cdot {V_m}_t^{\angle{\theta_t}}  \cdot  {Y_t}_{kf}^*
+$$
+
+### Controls and solvability
+
+The power flow simulation is an optimization problem 
+formed by equality constraints. Because of this: 
+
+- For every AC island we must specify one voltage module $Vm$ and one voltage angle $\theta$. 
+Usually, at the so called *slack bus*.
+
+In AC grids there are 4 magnitudes that enter into play ($V_m$, $\theta$, $P$ and $Q$ )
+
+| Bus type  | Use | $V_m$ |  $\theta$ | $P$ | $Q$ |
+-----------|-----|-------|-----------|-----|-----|
+| $V\theta$ | (Slack) | Set   |  Set | Calc. | Calc. |
+| $PQ$      | (No voltage control) | Calc. |  Calc. | Set | Set |
+| $PV$      | (Local voltage control) | Set   |  Calc. | Set | Calc. |
+| $P$       | (voltage controlling bus) | Calc. |  Calc. | Set | Calc. |
+|  $PQV$    | (Remote voltage controlled) | Set   |  Calc. | Set | Set |
+
+$V\theta$: Used for Slack nodes and external grids representation. This acts as the system necessary voltage reference.
+
+$PQ$: Used for loads and external grids representation.
+
+$PV$: Used for voltage-controlled generation.
+
+$P$ + $PQV$: Used for remote voltage control made by generators and transformers.
+
+
+
+### Linearization for Newton-Raphson like methods:
+
+The linearization of any system of non linear equations looks like this:
+
+$$
+\begin{bmatrix}
+\Delta f
+\end{bmatrix}
+=
+\begin{bmatrix}
+J
+\end{bmatrix}
+\begin{bmatrix}
+\Delta x
+\end{bmatrix}
+$$
+
+Adapting for the power flow problem:
+
+$$
 \begin{bmatrix}
 P^{\text{spec}} - P(V,\theta) \\
 Q^{\text{spec}} - Q(V,\theta)
 \end{bmatrix}
-$$
-
-$$
-\begin{bmatrix}
-\Delta P \\
-\Delta Q
-\end{bmatrix}
 =
 \begin{bmatrix}
-J_{11} & J_{12} \\
-J_{21} & J_{22}
+\partial P/\partial V_m & \partial P/\partial V_m \\
+\partial Q/\partial \theta & \partial Q/\partial V_m
 \end{bmatrix}
 \begin{bmatrix}
 \Delta \theta \\
@@ -104,16 +157,44 @@ J_{21} & J_{22}
 \end{bmatrix}
 $$
 
-with Jacobian blocks $J_{11}=\partial P/\partial \theta$,
-$J_{12}=\partial P/\partial |V|$,
-$J_{21}=\partial Q/\partial \theta$,
-$J_{22}=\partial Q/\partial |V|$.
+The Newton-Raphson algorithm consists in the following steps:
 
-Historical references:
-- Ward, J. B., and Hale, H. W. (1956), "Digital Computer Solution of Power-Flow Problems", *Transactions of the AIEE, Part III*.
-- Van Ness, J. E., and Griffin, J. H. (1961), "Elimination methods for load-flow studies", *Transactions of the AIEE, Part III*.
-- Tinney, W. F., and Hart, C. E. (1967), "Power Flow Solution by Newton's Method", *IEEE Transactions on Power Apparatus and Systems*.
-- Stott, B., and Alsac, O. (1974), "Fast Decoupled Load Flow", *IEEE Transactions on Power Apparatus and Systems*.
+1. Pick an initial value for x (for instance: $V_m=1$ and $\theta=0$)
+2. Compute $fx$.
+3. converged = $max(abs(fx)) <= tolerance$
+4. if converged -> end.
+
+5. While not converged:
+   6. Compute J
+   7. Solve $\Delta x = J^{-1} \times fx$
+   8. $x = x - \Delta x$
+   9. Compute $fx$.
+   10. converged = $max(abs(fx)) <= tolerance$
+11. END
+
+Example with VeraGrid:
+
+```python
+import os
+import VeraGridEngine as vg
+
+folder = os.path.join('data', 'pglib_opf')
+fname = os.path.join(folder, 'IEEE39_1W.veragrid[pglib_opf_case14_ieee.matpower](data/pglib_opf/pglib_opf_case14_ieee.matpower)')
+main_circuit = vg.open_file(fname)
+
+options = vg.PowerFlowOptions(
+    solver_type=vg.SolverType.NR,
+    tolerance=1e-6,
+    max_iter=20,
+    retry_with_other_methods=False
+)
+results = vg.power_flow(main_circuit)
+
+print(main_circuit.name)
+print('Converged:', results.converged, 'error:', results.error)
+print(results.get_bus_df())
+print(results.get_branch_df())
+```
 
 ### Linear formulation (the wildly popular method)
 The most common linear approximation is the **DC power flow** (for AC active power):
@@ -159,16 +240,45 @@ This approximation is fast and very useful for screening, contingency ranking,
 market/PTDF analysis, and initialization, but it does not model reactive power,
 voltage magnitude variation, or losses accurately.
 
-### Solvability rules for AC power flow
+Example:
 
-The power flow simulation is an optimization problem 
-formed by equality constraints. Because of this: 
+```python
+import os
+import VeraGridEngine as vg
 
-- For every AC island we must specify one voltage module $Vm$ and one voltage angle $\theta$. 
-Usually, at the so called *slack bus*.
+folder = os.path.join('data', 'pglib_opf')
+fname = os.path.join(folder, 'IEEE39_1W.veragrid[pglib_opf_case14_ieee.matpower](data/pglib_opf/pglib_opf_case14_ieee.matpower)')
+main_circuit = vg.open_file(fname)
+
+options = vg.PowerFlowOptions(
+    solver_type=vg.SolverType.Linear,
+    tolerance=1e-6,
+    max_iter=20,
+    retry_with_other_methods=False
+)
+results = vg.power_flow(main_circuit)
+
+print(main_circuit.name)
+print('Converged:', results.converged, 'error:', results.error)
+print(results.get_bus_df())
+print(results.get_branch_df())
+```
+
 
 ## DC power flow
 
+The DC power flow is exactly equal to the AC formulation but without "reactive" parts:
+
+
+$$
+P_i = V_i I_i = V_i\left(\sum_{j \in \mathcal{N}} G_{ij}V_j\right)
+$$
+
+For clarity:
+
+$$
+P_i = V_i\left(\sum_{j \in \mathcal{N}} G_{ij}V_j\right)
+$$
 
 ### Solvability rules for AC-Linear power flow
 
